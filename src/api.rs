@@ -351,23 +351,32 @@ impl Api {
         impl<'a> Iterator for ApiQuery<'a> {
             type Item = Result<Value, Box<dyn Error>>;
             fn next(&mut self) -> Option<Self::Item> {
-                if let Some(0) = self.values_remaining {
+                if self.values_remaining == Some(0) {
                     return None;
                 }
 
                 let mut current_params = self.params.clone();
-                if let Value::Object(obj) = &self.continue_params {
-                    current_params.extend(obj.iter()
+                if let Value::Object(obj) = self.continue_params.take() {
+                    current_params.extend(obj.into_iter()
                         .filter(|x| x.0 != "continue")
 
-                        // The default to_string() method for Value puts double-quotes around strings
-                        .map(|(k, v)| (k.to_string(),
-                            v.as_str().map_or(v.to_string(), Into::into))));
+                        // Continue values are probably always strings;
+                        // if not, they will be converted into strings,
+                        // in JSON format.
+                        .map(|(k, v)| {
+                            let v = if let Value::String(s) = v {
+                                s
+                            } else {
+                                v.to_string()
+                            };
+                            (k, v)
+                        })
+                    );
                 }
 
                 Some(match self.api.get_query_api_json(&current_params) {
                     Ok(mut result) => {
-                        self.continue_params = result["continue"].clone();
+                        self.continue_params = result["continue"].take();
                         if self.continue_params.is_null() {
                             self.values_remaining = Some(0);
                         } else if let Some(num) = self.values_remaining {
