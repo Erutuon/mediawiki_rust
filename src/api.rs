@@ -45,12 +45,24 @@ const DEFAULT_MAX_RETRY_ATTEMPTS: u64 = 5;
 type HmacSha1 = hmac::Hmac<sha1::Sha1>;
 
 #[macro_export]
-/// To quickly create a hashmap.
+/// To quickly create a `HashMap`.
 /// Example: `hashmap!["action"=>"query","meta"=>"siteinfo","siprop"=>"general|namespaces|namespacealiases|libraries|extensions|statistics"]`
 macro_rules! hashmap {
-    ($( $key: expr => $val: expr ),*) => {{
+    ($( $key: expr => $val: expr ),* $(,)?) => {{
          let mut map = ::std::collections::HashMap::new();
          $( map.insert($key, $val); )*
+         map
+    }}
+}
+
+#[macro_export]
+/// Quickly create a `HashMap<String, String>`, converting values to `String` using `Into::into`.
+/// Example: `params_map![
+/// "action"=>"query","meta"=>"siteinfo","siprop"=>"general|namespaces|namespacealiases|libraries|extensions|statistics"]`
+macro_rules! params_map {
+    ($( $key: expr => $val: expr ),* $(,)?) => {{
+         let mut map = ::std::collections::HashMap::<String, String>::new();
+         $( map.insert($key.into(), $val.into()); )*
          map
     }}
 }
@@ -232,7 +244,11 @@ impl Api {
     /// Loads the site info.
     /// Should only ever be called from `new()`
     fn load_site_info(&mut self) -> Result<&Value, Box<dyn Error>> {
-        let params = hashmap!["action".to_string()=>"query".to_string(),"meta".to_string()=>"siteinfo".to_string(),"siprop".to_string()=>"general|namespaces|namespacealiases|libraries|extensions|statistics".to_string()];
+        let params = params_map![
+            "action" => "query",
+            "meta" => "siteinfo",
+            "siprop" => "general|namespaces|namespacealiases|libraries|extensions|statistics",
+        ];
         self.site_info = self.get_query_api_json(&params)?;
         Ok(&self.site_info)
     }
@@ -277,7 +293,9 @@ impl Api {
 
     /// Returns a token of a `token_type`, such as `login` or `csrf` (for editing)
     pub fn get_token(&mut self, token_type: &str) -> Result<String, Box<dyn Error>> {
-        let mut params = hashmap!["action".to_string()=>"query".to_string(),"meta".to_string()=>"tokens".to_string()];
+        let mut params = params_map![
+            "action" => "query", "meta" => "tokens",
+        ];
         if token_type.len() != 0 {
             params.insert("type".to_string(), token_type.to_string());
         }
@@ -402,7 +420,7 @@ impl Api {
     }
 
     /// Runs a query against the MediaWiki API, using `method` GET or POST.
-    /// Parameters are a hashmap; `format=json` is enforced.
+    /// Parameters are a `HashMap`; `format=json` is enforced.
     pub fn query_api_json(
         &self,
         params: &HashMap<String, String>,
@@ -434,7 +452,7 @@ impl Api {
     }
 
     /// Runs a query against the MediaWiki API, using `method` GET or POST.
-    /// Parameters are a hashmap; `format=json` is enforced.
+    /// Parameters are a `HashMap`; `format=json` is enforced.
     fn query_api_json_mut(
         &mut self,
         params: &HashMap<String, String>,
@@ -870,10 +888,13 @@ impl Api {
         lgname: S,
         lgpassword: S,
     ) -> Result<(), Box<dyn Error>> {
-        let lgname: &str = &lgname.into();
-        let lgpassword: &str = &lgpassword.into();
         let lgtoken = self.get_token("login")?;
-        let params = hashmap!("action".to_string()=>"login".to_string(),"lgname".to_string()=>lgname.into(),"lgpassword".to_string()=>lgpassword.into(),"lgtoken".to_string()=>lgtoken.into());
+        let params = params_map! (
+            "action" => "login",
+            "lgname" => lgname,
+            "lgpassword" => lgpassword,
+            "lgtoken" => lgtoken
+        );
         let res = self.query_api_json_mut(&params, "POST")?;
         if res["login"]["result"] == "Success" {
             self.user.set_from_login(&res["login"])?;
@@ -905,7 +926,10 @@ impl Api {
     /// Tries to get the SPARQL endpoint URL from the site info
     pub fn sparql_query(&self, query: &str) -> Result<Value, Box<dyn Error>> {
         let query_api_url = self.get_site_info_string("general", "wikibase-sparql")?;
-        let params = hashmap!["query".to_string()=>query.to_string(),"format".to_string()=>"json".to_string()];
+        let params = params_map![
+            "query" => query,
+            "format" => "json"
+        ];
         let response = self.query_raw_response(&query_api_url, &params, "POST")?;
         match response.json() {
             Ok(json) => Ok(json),
