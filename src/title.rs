@@ -14,10 +14,6 @@ The `Title` class deals with page titles and namespaces
     unused_qualifications
 )]
 
-extern crate lazy_static;
-
-use std::hash::{Hash, Hasher};
-
 /// Shortcut for crate::api::NamespaceID
 type NamespaceID = crate::api::NamespaceID;
 
@@ -44,17 +40,10 @@ pub fn toggle_namespace_id(id: NamespaceID) -> Option<NamespaceID> {
 }
 
 /// Title struct
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Title {
-    title: String, // Always stored without underscores
     namespace_id: NamespaceID,
-}
-
-impl Hash for Title {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.namespace_id.hash(state);
-        self.title.hash(state);
-    }
+    title: String, // Always stored without underscores
 }
 
 impl Title {
