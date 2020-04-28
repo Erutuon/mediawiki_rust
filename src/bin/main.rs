@@ -2,13 +2,13 @@ extern crate config;
 
 use config::*;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 
 /*
 extern crate mediawiki;
 extern crate wikibase;
+use mediawiki::params_map;
 use wikibase::entity_diff::*;
 
 use wikibase::*;
@@ -17,14 +17,12 @@ fn _einstein_categories() {
     let api = mediawiki::api::Api::new("https://en.wikipedia.org/w/api.php").unwrap();
 
     // Query parameters
-    let params: HashMap<_, _> = vec![
-        ("action", "query"),
-        ("prop", "categories"),
-        ("titles", "Albert Einstein"),
-        ("cllimit", "500"),
-    ]
-    .into_iter()
-    .collect();
+    let params = params_map! {
+        "action" => "query",
+        "prop" => "categories",
+        "titles" => "Albert Einstein",
+        "cllimit" => "500",
+    };
 
     // Run query
     let res = api.get_query_api_json_all(&params).unwrap();
@@ -57,14 +55,12 @@ fn _wikidata_edit() {
     api.login(lgname, lgpassword).unwrap();
 
     let token = api.get_edit_token().unwrap();
-    let params: HashMap<_, _> = vec![
-        ("action", "wbeditentity"),
-        ("id", "Q4115189"),
-        ("data",r#"{"claims":[{"mainsnak":{"snaktype":"value","property":"P1810","datavalue":{"value":"ExampleString","type":"string"}},"type":"statement","rank":"normal"}]}"#),
-        ("token", &token),
-    ]
-    .into_iter()
-    .collect();
+    let params = params_map! {
+        "action" => "wbeditentity",
+        "id" => "Q4115189",
+        "data" => r#"{"claims":[{"mainsnak":{"snaktype":"value","property":"P1810","datavalue":{"value":"ExampleString","type":"string"}},"type":"statement","rank":"normal"}]}"#,
+        "token" => token,
+    };
     let _res = api.post_query_api_json(&params).unwrap();
     //    dbg!(res["success"].as_u64().unwrap());
 }
@@ -147,19 +143,14 @@ fn main() {
 fn _edit_sandbox_item(api: &mut mediawiki::api::Api) -> Result<Value, Box<dyn Error>> {
     let q = "Q13406268"; // Second sandbox item
     let token = api.get_edit_token().unwrap();
-    let params: HashMap<String, String> = vec![
-        ("action".to_string(), "wbcreateclaim".to_string()),
-        ("entity".to_string(), q.to_string()),
-        ("property".to_string(), "P31".to_string()),
-        ("snaktype".to_string(), "value".to_string()),
-        (
-            "value".to_string(),
-            "{\"entity-type\":\"item\",\"id\":\"Q12345\"}".to_string(),
-        ),
-        ("token".to_string(), token.to_string()),
-    ]
-    .into_iter()
-    .collect();
+    let params = mediawiki::params_map! {
+        "action" => "wbcreateclaim",
+        "entity" => q,
+        "property" => "P31",
+        "snaktype" => "value",
+        "value" => r#"{"entity-type":"item","id":"Q12345"}"#,
+        "token" => token,
+    };
 
     api.post_query_api_json(&params)
 }
@@ -182,23 +173,13 @@ fn _oauth_edit(api: &mut mediawiki::api::Api) {
     api.set_oauth(Some(oauth_params));
     //let _x = api.oauth().clone();
 
-    let mut params: HashMap<String, String> = vec![
-        ("action", "wbeditentity"),
-        ("id", sandbox_item),
-        (
-            "data",
-            "{\"labels\":[{\"language\":\"no\",\"value\":\"Baz\",\"add\":\"\"}]}",
-        ),
-        ("summary", "testing"),
-    ]
-    .iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect();
-
-    params.insert(
-        "token".to_string(),
-        api.get_edit_token().expect("Could not get edit token"),
-    );
+    let params = mediawiki::params_map! {
+        "action" => "wbeditentity",
+        "id" => sandbox_item,
+        "data" => r#"{"labels":[{"language":"no","value":"Baz","add":""}]}"#,
+        "summary" => "testing",
+        "token" => api.get_edit_token().expect("Could not get edit token"),
+    };
 
     match api.post_query_api_json_mut(&params) {
         Ok(_) => println!("Edited https://www.wikidata.org/wiki/{}", sandbox_item),
@@ -222,19 +203,14 @@ fn main() {
 
             let q = "Q4115189"; // Sandbox item
             let token = api.get_edit_token().unwrap();
-            let params: HashMap<String, String> = vec![
-                ("action".to_string(), "wbcreateclaim".to_string()),
-                ("entity".to_string(), q.to_string()),
-                ("property".to_string(), "P31".to_string()),
-                ("snaktype".to_string(), "value".to_string()),
-                (
-                    "value".to_string(),
-                    "{\"entity-type\":\"item\",\"id\":\"Q12345\"}".to_string(),
-                ),
-                ("token".to_string(), token.to_string()),
-            ]
-            .into_iter()
-            .collect();
+            let params = mediawiki::params_map! {
+                "action" => "wbcreateclaim",
+                "entity" => q,
+                "property" => "P31",
+                "snaktype" => "value",
+                "value"  => r#"{"entity-type":"item","id":"Q12345"}"#,
+                "token" => token,
+            };
 
             let res = api.post_query_api_json(&params).unwrap();
             dbg!(&res);

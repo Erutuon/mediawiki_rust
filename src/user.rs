@@ -15,8 +15,8 @@ The `User` class deals with the (current) Api user.
 )]
 
 use crate::api::Api;
+use crate::params_map;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::error::Error;
 
 /// `User` contains the login data for the `Api`
@@ -97,22 +97,16 @@ impl User {
 
     /// Loads the user info, which is stored in the object; returns Ok(()) if successful
     pub fn load_user_info(&mut self, api: &Api) -> Result<(), Box<dyn Error>> {
-        match self.user_info {
-            Some(_) => return Ok(()),
-            None => {
-                let params: HashMap<String, String> = vec![
-                    ("action", "query"),
-                    ("meta", "userinfo"),
-                    ("uiprop", "blockinfo|groups|groupmemberships|implicitgroups|rights|options|ratelimits|realname|registrationdate|unreadcount|centralids|hasmsg"),
-                ]
-                .iter()
-                .map(|x| (x.0.to_string(), x.1.to_string()))
-                .collect();
-                let res = api.query_api_json(&params, "GET")?;
-                self.user_info = Some(res);
-                Ok(())
-            }
+        if self.user_info.is_none() {
+            let params = params_map![
+                "action" => "query",
+                "meta" => "userinfo",
+                "uiprop" => "blockinfo|groups|groupmemberships|implicitgroups|rights|options|ratelimits|realname|registrationdate|unreadcount|centralids|hasmsg",
+            ];
+            let res = api.query_api_json(&params, "GET")?;
+            self.user_info = Some(res);
         }
+        Ok(())
     }
 
     /// Returns the user name ("" if not logged in)

@@ -44,27 +44,43 @@ const DEFAULT_MAX_RETRY_ATTEMPTS: u64 = 5;
 
 type HmacSha1 = hmac::Hmac<sha1::Sha1>;
 
-#[macro_export]
 /// To quickly create a `HashMap`.
 /// Example: `hashmap!["action"=>"query","meta"=>"siteinfo","siprop"=>"general|namespaces|namespacealiases|libraries|extensions|statistics"]`
+#[macro_export]
 macro_rules! hashmap {
     ($( $key: expr => $val: expr ),* $(,)?) => {{
-         let mut map = ::std::collections::HashMap::new();
+        let mut map = ::std::collections::HashMap::with_capacity(
+           <[()]>::len(&[
+               $($crate::params_map! (@replace $key ()))*
+           ])
+        );
          $( map.insert($key, $val); )*
          map
-    }}
+    }};
+    (@replace $_a:tt $b:expr) => {$b};
 }
 
-#[macro_export]
 /// Quickly create a `HashMap<String, String>`, converting values to `String` using `Into::into`.
-/// Example: `params_map![
-/// "action"=>"query","meta"=>"siteinfo","siprop"=>"general|namespaces|namespacealiases|libraries|extensions|statistics"]`
+/// ```
+/// # use mediawiki::params_map;
+/// let params = params_map! {
+///     "action" => "query",
+///     "meta" => "siteinfo",
+///     "siprop" => "general|namespaces|namespacealiases|libraries|extensions|statistics",
+/// }
+/// ```
+#[macro_export]
 macro_rules! params_map {
     ($( $key: expr => $val: expr ),* $(,)?) => {{
-         let mut map = ::std::collections::HashMap::<String, String>::new();
+         let mut map = ::std::collections::HashMap::<String, String>::with_capacity(
+            <[()]>::len(&[
+                $($crate::params_map! (@replace $key ())),*
+            ])
+         );
          $( map.insert($key.into(), $val.into()); )*
          map
-    }}
+    }};
+    (@replace $_a:tt $b:expr) => {$b};
 }
 
 /// `OAuthParams` contains parameters for OAuth requests
@@ -194,7 +210,7 @@ impl Api {
 
     /// Returns the maximum number of retry attempts
     pub fn max_retry_attempts(&self) -> u64 {
-        return self.max_retry_attempts;
+        self.max_retry_attempts
     }
 
     /// Sets the maximum number of retry attempts
@@ -204,7 +220,7 @@ impl Api {
 
     /// Returns a reference to the serde_json Value containing the site info
     pub fn get_site_info(&self) -> &Value {
-        return &self.site_info;
+        &self.site_info
     }
 
     /// Returns a serde_json Value in site info, within the `["query"]` object.
@@ -214,10 +230,9 @@ impl Api {
 
     /// Returns a String from the site info, matching `["query"][k1][k2]`
     pub fn get_site_info_string<'a>(&'a self, k1: &str, k2: &str) -> Result<&'a str, String> {
-        match self.get_site_info_value(k1, k2).as_str() {
-            Some(s) => Ok(s),
-            None => Err(format!("No 'query.{}.{}' value in site info", k1, k2)),
-        }
+        self.get_site_info_value(k1, k2)
+            .as_str()
+            .ok_or_else(|| format!("No 'query.{}.{}' value in site info", k1, k2))
     }
 
 
@@ -258,21 +273,17 @@ impl Api {
     /// This allows for combining multiple API results via the `continue` parameter
     fn json_merge(&self, a: &mut Value, b: Value) {
         match (a, b) {
-            (a @ &mut Value::Object(_), Value::Object(b)) => match a.as_object_mut() {
-                Some(a) => {
+            (a @ &mut Value::Object(_), Value::Object(b)) => {
+                if let Some(a) = a.as_object_mut() {
                     for (k, v) in b {
                         self.json_merge(a.entry(k).or_insert(Value::Null), v);
                     }
                 }
-                None => {}
             },
-            (a @ &mut Value::Array(_), Value::Array(b)) => match a.as_array_mut() {
-                Some(a) => {
-                    for v in b {
-                        a.push(v);
-                    }
+            (a @ &mut Value::Array(_), Value::Array(b)) => {
+                if let Some(a) = a.as_array_mut() {
+                    a.extend(b);
                 }
-                None => {}
             },
             (a, b) => *a = b,
         }
@@ -300,14 +311,15 @@ impl Api {
             params.insert("type".to_string(), token_type.to_string());
         }
         let mut key = token_type.to_string();
-        key += &"token";
+        key += "token";
         if token_type.len() == 0 {
             key = "csrftoken".into()
         }
-        let x = self.query_api_json_mut(&params, "GET")?;
-        match &x["query"]["tokens"][&key] {
-            Value::String(s) => Ok(s.to_string()),
-            _ => Err(From::from(format!("Could not get token: {:?}", x))),
+        let mut response = self.query_api_json_mut(&params, "GET")?;
+        if let Value::String(s) = response["query"]["tokens"][&key].take() {
+            Ok(s)
+        } else {
+            Err(format!("Could not get token: {:?}", response).into())
         }
     }
 
@@ -326,16 +338,13 @@ impl Api {
 
     /// Tries to return the len() of an API query result. Returns 0 if unknown
     fn query_result_count(&self, result: &Value) -> usize {
-        match result["query"].as_object() {
-            Some(query) => query
+        if let Some(query) = result["query"].as_object() {
+            query
                 .iter()
-                .filter_map(|(_key, part)| match part.as_array() {
-                    Some(a) => Some(a.len()),
-                    None => None,
-                })
-                .next()
-                .unwrap_or(0),
-            None => 0, // Don't know size
+                .find_map(|(_key, part)| part.as_array().map(|a| a.len()))
+                .unwrap_or(0)
+        } else {
+            0 // Don't know size
         }
     }
 
@@ -434,19 +443,18 @@ impl Api {
             self.set_cumulative_maxlag_params(&mut params, method, cumulative);
             let t = self.query_api_raw(&params, method)?;
             let v: Value = serde_json::from_str(&t)?;
-            match self.check_maxlag(&v) {
-                Some(lag_seconds) => {
-                    if attempts_left == 0 {
-                        return Err(From::from(format!(
-                            "Max attempts reached [MAXLAG] after {} attempts, cumulative maxlag {}",
-                            &self.max_retry_attempts, cumulative
-                        )));
-                    }
-                    attempts_left -= 1;
-                    cumulative += lag_seconds;
-                    thread::sleep(time::Duration::from_millis(1000 * lag_seconds));
+            if let Some(lag_seconds) = self.check_maxlag(&v) {
+                if attempts_left == 0 {
+                    return Err(From::from(format!(
+                        "Max attempts reached [MAXLAG] after {} attempts, cumulative maxlag {}",
+                        &self.max_retry_attempts, cumulative
+                    )));
                 }
-                None => return Ok(v),
+                attempts_left -= 1;
+                cumulative += lag_seconds;
+                thread::sleep(time::Duration::from_millis(1000 * lag_seconds));
+            } else {
+                return Ok(v);
             }
         }
     }
@@ -466,19 +474,18 @@ impl Api {
             self.set_cumulative_maxlag_params(&mut params, method, cumulative);
             let t = self.query_api_raw_mut(&params, method)?;
             let v: Value = serde_json::from_str(&t)?;
-            match self.check_maxlag(&v) {
-                Some(lag_seconds) => {
-                    if attempts_left == 0 {
-                        return Err(From::from(format!(
-                            "Max attempts reached [MAXLAG] after {} attempts, cumulative maxlag {}",
-                            &self.max_retry_attempts, cumulative
-                        )));
-                    }
-                    attempts_left -= 1;
-                    cumulative += lag_seconds;
-                    thread::sleep(time::Duration::from_millis(1000 * lag_seconds));
+            if let Some(lag_seconds) = self.check_maxlag(&v) {
+                if attempts_left == 0 {
+                    return Err(From::from(format!(
+                        "Max attempts reached [MAXLAG] after {} attempts, cumulative maxlag {}",
+                        &self.max_retry_attempts, cumulative
+                    )));
                 }
-                None => return Ok(v),
+                attempts_left -= 1;
+                cumulative += lag_seconds;
+                thread::sleep(time::Duration::from_millis(1000 * lag_seconds));
+            } else {
+                return Ok(v);
             }
         }
     }
@@ -522,11 +529,8 @@ impl Api {
         if !self.is_edit_query(params, method) {
             return;
         }
-        match self.maxlag_seconds {
-            Some(maxlag_seconds) => {
-                params.insert("maxlag".to_string(), maxlag_seconds.to_string());
-            }
-            None => {}
+        if let Some(maxlag_seconds) = self.maxlag_seconds {
+            params.insert("maxlag".to_string(), maxlag_seconds.to_string());
         }
     }
 
@@ -540,23 +544,18 @@ impl Api {
         if !self.is_edit_query(params, method) {
             return;
         }
-        match self.maxlag_seconds {
-            Some(maxlag_seconds) => {
-                let added = cumulative + maxlag_seconds;
-                params.insert("maxlag".to_string(), added.to_string());
-            }
-            None => {}
+        if let Some(maxlag_seconds) = self.maxlag_seconds {
+            let added = cumulative + maxlag_seconds;
+            params.insert("maxlag".to_string(), added.to_string());
         }
     }
 
     /// Checks for a MAGLAG error, and returns the lag if so
     fn check_maxlag(&self, v: &Value) -> Option<u64> {
-        match v["error"]["code"].as_str() {
-            Some(code) => match code {
-                "maxlag" => v["error"]["lag"].as_u64().or(self.maxlag_seconds), // Current lag, if given, or fallback
-                _ => None,
-            },
-            None => None,
+        if v["error"]["code"].as_str() == Some("maxlag") {
+            v["error"]["lag"].as_u64().or(self.maxlag_seconds) // Current lag, if given, or fallback
+        } else {
+            None
         }
     }
 
@@ -597,11 +596,8 @@ impl Api {
             })
             .collect::<Vec<String>>();
         for cs in cookie_strings {
-            match Cookie::parse(cs.clone()) {
-                Ok(cookie) => {
-                    self.cookie_jar.add(cookie);
-                }
-                Err(_) => {}
+            if let Ok(cookie) = Cookie::parse(cs.clone()) {
+                self.cookie_jar.add(cookie);
             }
         }
     }
@@ -682,37 +678,38 @@ impl Api {
 
         let ret: Vec<String> = keys
             .iter()
-            .filter_map(|k| match to_sign.get(k) {
-                Some(k2) => {
-                    let v = self.rawurlencode(&k2);
-                    Some(k.clone() + &"=" + &v)
-                }
-                None => None,
+            .filter_map(|k| {
+                to_sign.get(k).map(|v| {
+                    format!("{}={}", k, self.rawurlencode(v))
+                })
             })
             .collect();
 
         let url = Url::parse(api_url)?;
-        let mut url_string = url.scheme().to_owned() + &"://";
-        url_string += url.host_str().ok_or("url.host_str is None")?;
-        match url.port() {
-            Some(port) => write!(url_string, ":{}", port).unwrap(),
-            None => {}
+        let mut url_string = format!(
+            "{}://{}",
+            url.scheme(),
+            url.host_str().ok_or("url.host_str is None")?,
+        );
+        if let Some(port) = url.port() {
+            write!(url_string, ":{}", port).unwrap();
         }
         url_string += url.path();
 
         let ret = self.rawurlencode(&method)
-            + &"&"
+            + "&"
             + &self.rawurlencode(&url_string)
-            + &"&"
+            + "&"
             + &self.rawurlencode(&ret.join("&"));
 
-        let key: String = match (&oauth.g_consumer_secret, &oauth.g_token_secret) {
-            (Some(g_consumer_secret), Some(g_token_secret)) => {
-                self.rawurlencode(g_consumer_secret) + &"&" + &self.rawurlencode(g_token_secret)
-            }
-            _ => {
-                return Err(From::from("g_consumer_secret or g_token_secret not set"));
-            }
+        let key: String = if let OAuthParams {
+            g_consumer_secret: Some(g_consumer_secret),
+            g_token_secret: Some(g_token_secret),
+            ..
+        } = &oauth {
+            self.rawurlencode(g_consumer_secret) + "&" + &self.rawurlencode(g_token_secret)
+        } else {
+            return Err(From::from("g_consumer_secret or g_token_secret not set"));
         };
 
         let mut hmac = HmacSha1::new_varkey(&key.into_bytes()).map_err(|e| format!("{:?}", e))?; //crypto::hmac::Hmac::new(Sha1::new(), &key.into_bytes());
@@ -730,14 +727,8 @@ impl Api {
         api_url: &str,
         params: &HashMap<String, String>,
     ) -> Result<reqwest::blocking::RequestBuilder, Box<dyn Error>> {
-        let oauth = match &self.oauth {
-            Some(oauth) => oauth,
-            None => {
-                return Err(From::from(
-                    "oauth_request_builder called but self.oauth is None",
-                ))
-            }
-        };
+        let oauth = self.oauth.as_ref()
+            .ok_or("oauth_request_builder called but self.oauth is None")?;
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)?
@@ -782,7 +773,7 @@ impl Api {
                 let value = value.to_str().unwrap();
                 let key = self.rawurlencode(&key);
                 let value = self.rawurlencode(&value);
-                key.to_string() + &"=\"" + &value + &"\""
+                key.to_string() + "=\"" + &value + "\""
             })
             .collect();
         header += &parts.join(", ");
@@ -841,7 +832,7 @@ impl Api {
         let req = self.request_builder(api_url, params, method)?;
         let resp = req.send()?;
         self.enact_edit_delay(params, method);
-        return Ok(resp);
+        Ok(resp)
     }
 
     /// Delays the current thread, if the query performs an edit, and a delay time is set
@@ -849,9 +840,8 @@ impl Api {
         if !self.is_edit_query(params, method) {
             return;
         }
-        match self.edit_delay_ms {
-            Some(ms) => thread::sleep(time::Duration::from_millis(ms)),
-            None => {}
+        if let Some(ms) = self.edit_delay_ms {
+            thread::sleep(time::Duration::from_millis(ms));
         }
     }
 
@@ -930,11 +920,7 @@ impl Api {
             "query" => query,
             "format" => "json"
         ];
-        let response = self.query_raw_response(&query_api_url, &params, "POST")?;
-        match response.json() {
-            Ok(json) => Ok(json),
-            Err(e) => Err(From::from(format!("{}", e))),
-        }
+        Ok(self.query_raw_response(&query_api_url, &params, "POST")?.json()?)
     }
 
     /// Given a `uri` (usually, an URL) that points to a Wikibase entity on this MediaWiki installation, returns the item ID
@@ -957,18 +943,12 @@ impl Api {
         variable_name: &str,
     ) -> Vec<String> {
         let mut entities = vec![];
-        match sparql_result["results"]["bindings"].as_array() {
-            Some(bindings) => {
-                for b in bindings {
-                    match b[variable_name]["value"].as_str() {
-                        Some(entity_url) => {
-                            entities.push(self.extract_entity_from_uri(entity_url).unwrap());
-                        }
-                        None => {}
-                    }
+        if let Some(bindings) = sparql_result["results"]["bindings"].as_array() {
+            for b in bindings {
+                if let Some(entity_url) = b[variable_name]["value"].as_str() {
+                    entities.push(self.extract_entity_from_uri(entity_url).unwrap());
                 }
             }
-            None => {}
         }
         entities
     }
@@ -1009,9 +989,10 @@ mod tests {
             ),
         ]);
         let result = api.get_query_api_json_all(&params).unwrap();
-        match result["query"]["search"].as_array() {
-            Some(arr) => assert!(arr.len() > 1500),
-            None => panic!("result.query.search is not an array"),
+        if let Some(arr) = result["query"]["search"].as_array() {
+            assert!(arr.len() > 1500);
+        } else {
+            panic!("result.query.search is not an array");
         }
     }
 

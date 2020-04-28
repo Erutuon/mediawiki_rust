@@ -18,13 +18,13 @@ extern crate lazy_static;
 
 use crate::api::Api;
 use crate::title::Title;
+use crate::params_map;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 
 /// Represents a page.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Page {
     title: Title,
 }
@@ -52,40 +52,30 @@ impl Page {
     pub fn text(&self, api: &Api) -> Result<String, PageError> {
         let title = self.title.full_pretty(api)
             .ok_or_else(|| PageError::BadTitle(self.title.clone()))?;
-        let params = [
-            ("action", "query"),
-            ("prop", "revisions"),
-            ("titles", &title),
-            ("rvslots", "*"),
-            ("rvprop", "content"),
-            ("formatversion", "2"),
-        ]
-        .iter()
-        .map(|&(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-        let result = api.get_query_api_json(&params)
-            .map_err(|e| PageError::RequestError(e))?;
+        let params = params_map! {
+            "action" => "query",
+            "prop" => "revisions",
+            "titles" => &title,
+            "rvslots" => "*",
+            "rvprop" => "content",
+            "formatversion" => "2",
+        };
+        let mut result = api.get_query_api_json(&params)
+            .map_err(PageError::RequestError)?;
 
-        let page = &result["query"]["pages"][0];
+        let mut page = result["query"]["pages"][0].take();
         if page["missing"].as_bool() == Some(true) {
             Err(PageError::Missing(self.title.clone()))
-        } else if let Some(slots) = page["revisions"][0]["slots"].as_object() {
-            if let Some(the_slot) = {
-                slots["main"].as_object().or_else(|| {
-                    if slots.len() == 1 {
-                        slots.values().next().unwrap().as_object() // unwrap OK, length is 1
-                    } else {
-                        None
-                    }
-                })
-            } {
-                match the_slot["content"].as_str() {
-                    Some(string) => Ok(string.to_string()),
-                    None => Err(PageError::BadResponse(result)),
+        } else if let Value::Object(mut slots) = page["revisions"][0]["slots"].take() {
+            slots.get_mut("main").map(|main_slot| main_slot.take()).or_else(|| {
+                slots.values_mut().next().map(|first_slot| first_slot.take())
+            }).map(|mut slot| {
+                if let Value::String(s) = slot["content"].take() {
+                    Some(s)
+                } else {
+                    None
                 }
-            } else {
-                Err(PageError::BadResponse(result))
-            }
+            }).flatten().ok_or_else(|| PageError::BadResponse(result))
         } else {
             Err(PageError::BadResponse(result))
         }
@@ -106,27 +96,25 @@ impl Page {
         let title = self.title.full_pretty(api)
             .ok_or_else(|| PageError::BadTitle(self.title.clone()))?;
         let bot = if api.user().is_bot() { "true" } else { "false" };
-        let mut params: HashMap<String, String> = [
-            ("action", "edit"),
-            ("title", &title),
-            ("text", &text.into()),
-            ("summary", &summary.into()),
-            ("bot", bot),
-            ("formatversion", "2"),
-            ("token", &api.get_edit_token()?),
-        ]
-        .iter()
-        .map(|&(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+        let mut params = params_map! {
+            "action" => "edit",
+            "title" => title,
+            "text" => text,
+            "summary" => summary,
+            "bot" => bot,
+            "formatversion" => "2",
+            "token" => api.get_edit_token()?,
+        };
 
         if !api.user().user_name().is_empty() {
             params.insert("assert".to_string(), "user".to_string());
         }
 
         let result = api.post_query_api_json(&params)?;
-        match result["edit"].as_str() {
-            Some("Success") => Ok(()),
-            _ => Err(Box::new(PageError::EditError(result))),
+        if result["edit"].as_str() == Some("Success") {
+            Ok(())
+        } else {
+            Err(PageError::EditError(result).into())
         }
     }
 }
@@ -171,27 +159,21 @@ mod tests {
     use super::*;
     use crate::api::*;
 
-    fn wd_api() -> &'static Api {
-        lazy_static! {
-            static ref API: Api = Api::new("https://www.wikidata.org/w/api.php").unwrap();
-        }
-        &API
+    lazy_static! {
+        static ref WD_API: Api = Api::new("https://www.wikidata.org/w/api.php").unwrap();
     }
 
     #[test]
     fn page_text_main_page_nonempty() {
         let page = Page::new(Title::new("Main Page", 4));
-        let text = page.text(wd_api()).unwrap();
-        assert!(!text.is_empty());
+        let text = page.text(&WD_API);
+        assert!(text.is_ok() && !text.unwrap().is_empty());
     }
 
     #[test]
     fn page_text_nonexistent() {
         let title = Title::new("This page does not exist", 0);
         let page = Page::new(title.clone());
-        match page.text(wd_api()) {
-            Err(PageError::Missing(t)) => assert!(t == title),
-            x => panic!("expected missing error, found {:?}", x),
-        }
+        assert!(matches!(page.text(&WD_API), Err(PageError::Missing(t)) if t == title));
     }
 }

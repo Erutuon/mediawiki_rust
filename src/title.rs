@@ -14,6 +14,8 @@ The `Title` class deals with page titles and namespaces
     unused_qualifications
 )]
 
+use serde_json::Value;
+
 /// Shortcut for crate::api::NamespaceID
 type NamespaceID = crate::api::NamespaceID;
 
@@ -32,10 +34,12 @@ type NamespaceID = crate::api::NamespaceID;
 /// assert_eq!(toggle_namespace_id(-1), None);
 /// ```
 pub fn toggle_namespace_id(id: NamespaceID) -> Option<NamespaceID> {
-    match id {
-        n if n >= 0 && n % 2 == 0 => Some(n + 1),
-        n if n >= 0 && n % 2 == 1 => Some(n - 1),
-        _ => None,
+    if id < 0 {
+        None
+    } else if id % 2 == 0 {
+        Some(id + 1)
+    } else {
+        Some(id - 1)
     }
 }
 
@@ -52,72 +56,52 @@ impl Title {
     pub fn new(title: &str, namespace_id: NamespaceID) -> Title {
         Title {
             title: Title::underscores_to_spaces(&title),
-            namespace_id: namespace_id,
+            namespace_id,
         }
     }
 
     /// Constructor, where full namespace-prefixed title is known.
     /// Uses Api to parse valid namespaces
     pub fn new_from_full(full_title: &str, api: &crate::api::Api) -> Self {
-        let mut v: Vec<&str> = full_title.split(":").collect();
-        if v.len() == 1 {
-            return Self::new(&full_title, 0);
-        }
-        let namespace_name = Title::first_letter_uppercase(&v.remove(0));
-        let title = Title::underscores_to_spaces(&v.join(":"));
+        let mut splitter = full_title.splitn(2, ":");
+        let (namespace_name, title) = match (splitter.next(), splitter.next()) {
+            (Some(title), None) => return Self::new(&title, 0),
+            (Some(namespace_name), Some(title)) => {
+                (
+                    Title::first_letter_uppercase(namespace_name),
+                    Title::underscores_to_spaces(title)
+                )
+            }
+            _ => unreachable!(),
+        };
         let site_info = api.get_site_info();
 
+        let check_namespace = |ns: &Value, k: &str| -> bool {
+            ns[k].as_str().map(|ns| ns == &namespace_name).unwrap_or(false)
+        };
+
         // Canonical namespaces
-        match site_info["query"]["namespaces"].as_object() {
-            Some(namespaces) => {
-                for (_, ns) in namespaces {
-                    match ns["*"].as_str() {
-                        Some(namespace) => {
-                            if Title::underscores_to_spaces(&namespace)
-                                == namespace_name
-                            {
-                                return Self::new_from_namespace_object(title, ns);
-                            }
-                        }
-                        None => {}
-                    }
-                    match ns["canonical"].as_str() {
-                        Some(namespace) => {
-                            if Title::underscores_to_spaces(&namespace)
-                                == namespace_name
-                            {
-                                return Self::new_from_namespace_object(title, ns);
-                            }
-                        }
-                        None => {}
-                    }
+        if let Some(namespaces) = site_info["query"]["namespaces"].as_object() {
+            for (_, ns) in namespaces {
+                if check_namespace(ns, "*") || check_namespace(ns, "canonical") {
+                    return Self::new_from_namespace_object(title, ns);
                 }
             }
-            None => {}
         }
 
         // Aliases
-        match site_info["query"]["namespacealiases"].as_array() {
-            Some(namespaces) => {
-                for ns in namespaces {
-                    match ns["*"].as_str() {
-                        Some(namespace) => {
-                            if Title::underscores_to_spaces(&namespace)
-                                == namespace_name
-                            {
-                                let namespace_id = ns["id"].as_i64().unwrap();
-                                let title = match ns["case"].as_str() {
-                                    Some("first-letter") => Title::first_letter_uppercase(&title),
-                                    _ => title.to_string(),
-                                };
-                                return Self::new(&title, namespace_id);
-                            }
-                        }
-                        None => {}
-                    }
+        if let Some(namespaces) = site_info["query"]["namespacealiases"].as_array() {
+            for ns in namespaces {
+                if check_namespace(ns, "*") {
+                    let namespace_id = ns["id"].as_i64().unwrap();
+                    let title = if ns["case"].as_str() == Some("first-letter") {
+                        Title::first_letter_uppercase(&title)
+                    } else {
+                        title.to_string()
+                    };
+                    return Self::new(&title, namespace_id);
                 }
             }
-            None => {}
         }
 
         // Fallback
@@ -125,23 +109,24 @@ impl Title {
     }
 
     /// Constructor, used internally by `new_from_full`
-    fn new_from_namespace_object(title: String, ns: &serde_json::Value) -> Self {
+    fn new_from_namespace_object(title: String, ns: &Value) -> Self {
         let namespace_id = ns["id"].as_i64().unwrap();
-        let title = match ns["case"].as_str() {
-            Some("first-letter") => Title::first_letter_uppercase(&title),
-            _ => title.to_string(),
+        let title = if ns["case"].as_str() == Some("first-letter") {
+            Title::first_letter_uppercase(&title)
+        } else {
+            title.to_string()
         };
-        return Self::new(&title, namespace_id);
+        Self::new(&title, namespace_id)
     }
 
     /// Constructor, used by ``Api::result_array_to_titles``
-    pub fn new_from_api_result(data: &serde_json::Value) -> Title {
+    pub fn new_from_api_result(data: &Value) -> Title {
         let namespace_id = data["ns"].as_i64().unwrap_or(0).into();
         let mut title = data["title"].as_str().unwrap_or("").to_string();
 
         // If namespace!=0, remove namespace prefix. THIS IS NOT IDEAL AND SHOULD USE Api AS IN new_from_full!
         if namespace_id > 0 {
-            let mut v: Vec<&str> = title.split(":").collect();
+            let mut v: Vec<&str> = title.splitn(2, ":").collect();
             if v.len() > 1 {
                 v.remove(0);
                 title = v.join(":");
@@ -150,7 +135,7 @@ impl Title {
 
         Title {
             title: Title::underscores_to_spaces(&title),
-            namespace_id: namespace_id,
+            namespace_id,
         }
     }
 
