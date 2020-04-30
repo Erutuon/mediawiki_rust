@@ -98,11 +98,11 @@ impl User {
     /// Loads the user info, which is stored in the object; returns Ok(()) if successful
     pub fn load_user_info(&mut self, api: &Api) -> Result<(), Box<dyn Error>> {
         if self.user_info.is_none() {
-            let params = params_map![
+            let params = params_map! {
                 "action" => "query",
                 "meta" => "userinfo",
                 "uiprop" => "blockinfo|groups|groupmemberships|implicitgroups|rights|options|ratelimits|realname|registrationdate|unreadcount|centralids|hasmsg",
-            ];
+            };
             let res = api.query_api_json(&params, "GET")?;
             self.user_info = Some(res);
         }

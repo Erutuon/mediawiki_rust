@@ -259,11 +259,11 @@ impl Api {
     /// Loads the site info.
     /// Should only ever be called from `new()`
     fn load_site_info(&mut self) -> Result<&Value, Box<dyn Error>> {
-        let params = params_map![
+        let params = params_map! {
             "action" => "query",
             "meta" => "siteinfo",
             "siprop" => "general|namespaces|namespacealiases|libraries|extensions|statistics",
-        ];
+        };
         self.site_info = self.get_query_api_json(&params)?;
         Ok(&self.site_info)
     }
@@ -304,9 +304,9 @@ impl Api {
 
     /// Returns a token of a `token_type`, such as `login` or `csrf` (for editing)
     pub fn get_token(&mut self, token_type: &str) -> Result<String, Box<dyn Error>> {
-        let mut params = params_map![
+        let mut params = params_map! {
             "action" => "query", "meta" => "tokens",
-        ];
+        };
         if token_type.len() != 0 {
             params.insert("type".to_string(), token_type.to_string());
         }
@@ -916,10 +916,10 @@ impl Api {
     /// Tries to get the SPARQL endpoint URL from the site info
     pub fn sparql_query(&self, query: &str) -> Result<Value, Box<dyn Error>> {
         let query_api_url = self.get_site_info_string("general", "wikibase-sparql")?;
-        let params = params_map![
+        let params = params_map! {
             "query" => query,
             "format" => "json"
-        ];
+        };
         Ok(self.query_raw_response(&query_api_url, &params, "POST")?.json()?)
     }
 
