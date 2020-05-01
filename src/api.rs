@@ -151,7 +151,7 @@ impl Api {
     ) -> Result<Api, Box<dyn Error>> {
         let mut ret = Api {
             api_url: api_url.to_string(),
-            site_info: serde_json::from_str(r"{}")?,
+            site_info: json!{{}},
             client: builder.build()?,
             cookie_jar: CookieJar::new(),
             user: User::new(),
@@ -247,13 +247,13 @@ impl Api {
         namespace_id: NamespaceID,
     ) -> Option<&str> {
         let info = self.get_namespace_info(namespace_id);
-        info["canonical"].as_str().or_else(|| info["*"].as_str())
+        info["canonical"].as_str().or_else(|| info["name"].as_str())
     }
 
     /// Returns the local namespace name for a namespace ID, if defined
     pub fn get_local_namespace_name(&self, namespace_id: NamespaceID) -> Option<&str> {
         let info = self.get_namespace_info(namespace_id);
-        info["*"].as_str().or_else(|| info["canonical"].as_str())
+        info["name"].as_str().or_else(|| info["canonical"].as_str())
     }
 
     /// Loads the site info.
@@ -263,6 +263,7 @@ impl Api {
             "action" => "query",
             "meta" => "siteinfo",
             "siprop" => "general|namespaces|namespacealiases|libraries|extensions|statistics",
+            "formatversion" => "2",
         };
         self.site_info = self.get_query_api_json(&params)?;
         Ok(&self.site_info)

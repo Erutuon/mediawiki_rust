@@ -83,7 +83,7 @@ impl Title {
         // Canonical namespaces
         if let Some(namespaces) = site_info["query"]["namespaces"].as_object() {
             for (_, ns) in namespaces {
-                if check_namespace(ns, "*") || check_namespace(ns, "canonical") {
+                if check_namespace(ns, "name") || check_namespace(ns, "canonical") {
                     return Self::new_from_namespace_object(title, ns);
                 }
             }
@@ -92,7 +92,7 @@ impl Title {
         // Aliases
         if let Some(namespaces) = site_info["query"]["namespacealiases"].as_array() {
             for ns in namespaces {
-                if check_namespace(ns, "*") {
+                if check_namespace(ns, "alias") {
                     let namespace_id = ns["id"].as_i64().unwrap();
                     let title = if ns["case"].as_str() == Some("first-letter") {
                         Title::first_letter_uppercase(&title)
