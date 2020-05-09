@@ -146,7 +146,8 @@ mod tests {
 
     fn wd_api() -> &'static Api {
         lazy_static! {
-            static ref API: Api = Api::new("https://www.wikidata.org/w/api.php").unwrap();
+            static ref API: Api =
+                Api::new("https://www.wikidata.org/w/api.php").unwrap();
         }
         &API
     }

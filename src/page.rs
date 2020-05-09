@@ -17,8 +17,8 @@ The `Page` class deals with operations done on pages, like editing.
 extern crate lazy_static;
 
 use crate::api::Api;
-use crate::title::Title;
 use crate::params_map;
+use crate::title::Title;
 use serde_json::Value;
 use std::error::Error;
 use std::fmt;
@@ -50,7 +50,9 @@ impl Page {
     ///
     /// [`Api::get_query_api_json`]: ../api/struct.Api.html#method.get_query_api_json
     pub fn text(&self, api: &Api) -> Result<String, PageError> {
-        let title = self.title.full_pretty(api)
+        let title = self
+            .title
+            .full_pretty(api)
             .ok_or_else(|| PageError::BadTitle(self.title.clone()))?;
         let params = params_map! {
             "action" => "query",
@@ -60,22 +62,34 @@ impl Page {
             "rvprop" => "content",
             "formatversion" => "2",
         };
-        let mut result = api.get_query_api_json(&params)
+        let mut result: Value = api
+            .get_query_api_json(&params)
             .map_err(PageError::RequestError)?;
 
         let mut page = result["query"]["pages"][0].take();
         if page["missing"].as_bool() == Some(true) {
             Err(PageError::Missing(self.title.clone()))
-        } else if let Value::Object(mut slots) = page["revisions"][0]["slots"].take() {
-            slots.get_mut("main").map(|main_slot| main_slot.take()).or_else(|| {
-                slots.values_mut().next().map(|first_slot| first_slot.take())
-            }).map(|mut slot| {
-                if let Value::String(s) = slot["content"].take() {
-                    Some(s)
-                } else {
-                    None
-                }
-            }).flatten().ok_or_else(|| PageError::BadResponse(result))
+        } else if let Value::Object(mut slots) =
+            page["revisions"][0]["slots"].take()
+        {
+            slots
+                .get_mut("main")
+                .map(|main_slot| main_slot.take())
+                .or_else(|| {
+                    slots
+                        .values_mut()
+                        .next()
+                        .map(|first_slot| first_slot.take())
+                })
+                .map(|mut slot| {
+                    if let Value::String(s) = slot["content"].take() {
+                        Some(s)
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .ok_or_else(|| PageError::BadResponse(result))
         } else {
             Err(PageError::BadResponse(result))
         }
@@ -93,7 +107,9 @@ impl Page {
         text: impl Into<String>,
         summary: impl Into<String>,
     ) -> Result<(), Box<dyn Error>> {
-        let title = self.title.full_pretty(api)
+        let title = self
+            .title
+            .full_pretty(api)
             .ok_or_else(|| PageError::BadTitle(self.title.clone()))?;
         let bot = if api.user().is_bot() { "true" } else { "false" };
         let mut params = params_map! {
@@ -142,12 +158,21 @@ pub enum PageError {
 impl fmt::Display for PageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PageError::BadTitle(title) => write!(f, "invalid title for this Page: {:?}", title),
-            PageError::BadResponse(response) =>
-                write!(f, "bad API response while fetching revision content: {:?}", response),
+            PageError::BadTitle(title) => {
+                write!(f, "invalid title for this Page: {:?}", title)
+            }
+            PageError::BadResponse(response) => write!(
+                f,
+                "bad API response while fetching revision content: {:?}",
+                response
+            ),
             PageError::Missing(title) => write!(f, "page missing: {:?}", title),
-            PageError::EditError(response) => write!(f, "edit resulted in error: {:?}", response),
-            PageError::RequestError(error) => write!(f, "request error: {}", error),
+            PageError::EditError(response) => {
+                write!(f, "edit resulted in error: {:?}", response)
+            }
+            PageError::RequestError(error) => {
+                write!(f, "request error: {}", error)
+            }
         }
     }
 }
@@ -160,7 +185,8 @@ mod tests {
     use crate::api::*;
 
     lazy_static! {
-        static ref WD_API: Api = Api::new("https://www.wikidata.org/w/api.php").unwrap();
+        static ref WD_API: Api =
+            Api::new("https://www.wikidata.org/w/api.php").unwrap();
     }
 
     #[test]
@@ -174,6 +200,8 @@ mod tests {
     fn page_text_nonexistent() {
         let title = Title::new("This page does not exist", 0);
         let page = Page::new(title.clone());
-        assert!(matches!(page.text(&WD_API), Err(PageError::Missing(t)) if t == title));
+        assert!(
+            matches!(page.text(&WD_API), Err(PageError::Missing(t)) if t == title)
+        );
     }
 }

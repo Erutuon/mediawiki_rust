@@ -7,7 +7,9 @@ pub use reqwest;
 
 pub mod api;
 pub mod page;
+pub mod siteinfo;
 pub mod title;
+pub mod traits;
 pub mod user;
 
 lazy_static! {

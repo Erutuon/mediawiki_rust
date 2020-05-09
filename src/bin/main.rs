@@ -140,7 +140,9 @@ fn main() {
     _wikidata_item_tester();
 }*/
 
-fn _edit_sandbox_item(api: &mut mediawiki::api::Api) -> Result<Value, Box<dyn Error>> {
+fn _edit_sandbox_item(
+    api: &mut mediawiki::api::Api,
+) -> Result<Value, Box<dyn Error>> {
     let q = "Q13406268"; // Second sandbox item
     let token = api.get_edit_token().unwrap();
     let params = mediawiki::params_map! {
@@ -166,9 +168,10 @@ fn _login_api_from_config(api: &mut mediawiki::api::Api) {
 
 fn _oauth_edit(api: &mut mediawiki::api::Api) {
     let sandbox_item = "Q13406268";
-    let file = File::open("oauth_test.json").expect("File oauth_test.json not found");
-    let j =
-        serde_json::from_reader(file).expect("Reading/parsing JSON from oauth_test.json failed");
+    let file =
+        File::open("oauth_test.json").expect("File oauth_test.json not found");
+    let j = serde_json::from_reader(file)
+        .expect("Reading/parsing JSON from oauth_test.json failed");
     let oauth_params = mediawiki::api::OAuthParams::new_from_json(&j);
     api.set_oauth(Some(oauth_params));
     //let _x = api.oauth().clone();
@@ -182,7 +185,9 @@ fn _oauth_edit(api: &mut mediawiki::api::Api) {
     };
 
     match api.post_query_api_json_mut(&params) {
-        Ok(_) => println!("Edited https://www.wikidata.org/wiki/{}", sandbox_item),
+        Ok(_) => {
+            println!("Edited https://www.wikidata.org/wiki/{}", sandbox_item)
+        }
         Err(e) => panic!("{:?}", &e),
     }
 }
@@ -217,12 +222,16 @@ fn main() {
         }
     */
 
-    let api = mediawiki::api::Api::new("https://www.wikidata.org/w/api.php").unwrap();
-    let x = api.get_namespace_info(0);
+    let api =
+        mediawiki::api::Api::new("https://www.wikidata.org/w/api.php").unwrap();
+    let site_info = api.get_site_info();
+    assert!(site_info.is_some());
+    let site_info = site_info.unwrap();
+    let x = site_info.namespace_info_by_id(0);
     println!("{:?}", x);
-    let x = api.get_local_namespace_name(0);
+    let x = &site_info.namespace_info_by_id(0).unwrap().name;
     println!("{:?}", x);
-    let x = api.get_canonical_namespace_name(0);
+    let x = &site_info.namespace_info_by_id(0).unwrap().canonical;
     println!("{:?}", x);
 
     //login_api_from_config(&mut api);
